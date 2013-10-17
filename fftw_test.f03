@@ -1,12 +1,31 @@
+subroutine ddx(nx, ny, a, df)
+    integer, intent(in) :: nx, ny
+    real, dimension(:, :), intent(in) :: a
+    real, dimension(size(a, 1), size(a, 2)), intent(out) :: df
+    df = a
+end subroutine ddx
+
+subroutine init_displacement(a, x, y, nx, ny)
+    use, intrinsic :: iso_c_binding
+    implicit none
+    integer, intent(in) :: nx, ny
+    real(C_DOUBLE), dimension(nx, ny), intent(inout) :: a
+    real(C_DOUBLE), dimension(nx, ny), intent(in) :: x
+    real(C_DOUBLE), dimension(nx, ny), intent(in) :: y
+
+    a = sin(x)
+
+end subroutine init_displacement
+
 program fftw_test
     ! C binding
     use, intrinsic :: iso_c_binding
     implicit none
 
     double precision, parameter :: pi = 4*ATAN(1.0_C_DOUBLE)
-    complex, parameter :: ii =(0.0,1.0)
+    complex, parameter :: ii = (0.0, 1.0)
 
-    integer(C_INT), parameter :: Nx = 8
+    integer(C_INT), parameter :: Nx = 16
     integer(C_INT), parameter :: Ny = Nx
     double precision, parameter :: Lx = 2*pi, Ly = 2*pi
     ! Derived paramenter
@@ -40,8 +59,10 @@ include 'fftw3.f03'
     forall(i=1:Nx/2+1,j=Ny/2+1:Ny) ky(i,j)=2*pi*(j-Ny-1)/Ly
 
     ! Initial Condition
-    u0 = sin(x + y)
-    dudxE = cos(x + y)
+!    u0 = sin(x)
+    call init_displacement(u0, x, y, Nx, Ny)
+
+    dudxE = cos(x)
     do i=1, Nx
         write (*, *) u0(i, :)
     end do
@@ -57,9 +78,10 @@ include 'fftw3.f03'
 
     ! Derivative
     out = ii*kx*out
+!    out = ii*ky*out
 
     ! Back to physical space
-    pb = fftw_plan_dft_c2r_2d(Ny, Nx, out,in,FFTW_ESTIMATE)
+    pb = fftw_plan_dft_c2r_2d(Nx, Ny, out, in, FFTW_ESTIMATE)
     call fftw_execute_dft_c2r(pb,out,in)
 
     ! rescale
