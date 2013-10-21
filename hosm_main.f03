@@ -36,6 +36,40 @@ subroutine init_potential(phi, x, y, nx, ny)
 
 end subroutine init_potential
 
+subroutine rhs_Phi(b, y, t, res)
+    use, intrinsic :: iso_c_binding
+    implicit none
+    complex(C_DOUBLE_COMPLEX), intent(in) :: b, y
+    real(C_DOUBLE), intent(in) :: t
+    complex(C_DOUBLE_COMPLEX), intent(out) :: res
+    real(C_DOUBLE), parameter :: g = 9.8_C_DOUBLE
+
+    res = -g * b
+
+end subroutine rhs_Phi
+
+subroutine runge_kutta4_Phi(yn, t, dt, b, res)
+    use, intrinsic :: iso_c_binding
+    implicit none
+    complex(C_DOUBLE_COMPLEX), intent(in) :: yn, b
+    real(C_DOUBLE), intent(in) :: t, dt
+    complex(C_DOUBLE_COMPLEX), intent(out) :: res
+    complex(C_DOUBLE_COMPLEX) :: k1, k2, k3, k4
+    complex(C_DOUBLE_COMPLEX) :: tmp
+
+    call rhs_Phi(b, yn, t, tmp)
+    k1 = dt * tmp
+    call rhs_Phi(b, yn + 0.5_C_DOUBLE * k1, t + 0.5_C_DOUBLE * dt, tmp)
+    k2 = dt * tmp
+    call rhs_Phi(b, yn + 0.5_C_DOUBLE * k2, t + 0.5_C_DOUBLE * dt, tmp)
+    k3 = dt * tmp
+    call rhs_Phi(b, yn + k3, t + dt, tmp)
+    k4 = dt * tmp
+
+    res = yn + 1.0_C_DOUBLE / 6.0_C_DOUBLE * (k1 + 2.0_C_DOUBLE * k2 + 2.0_C_DOUBLE * k3 + k4)
+
+end subroutine runge_kutta4_Phi
+
 subroutine print_matrix(matrix, size_i, size_j)
     use, intrinsic :: iso_c_binding
     implicit none
@@ -54,20 +88,20 @@ program fftw_test
     use, intrinsic :: iso_c_binding
     implicit none
 
-    double precision, parameter :: pi = 4*ATAN(1.0_C_DOUBLE)
+    double precision, parameter :: pi = 4.0_C_DOUBLE * ATAN(1.0_C_DOUBLE)
     complex, parameter :: ii = (0.0, 1.0)
 
     integer(C_INT), parameter :: Nx = 8
     integer(C_INT), parameter :: Ny = Nx
-    double precision, parameter :: Lx = 2*pi, Ly = 2*pi
+    double precision, parameter :: Lx = 2.0 * pi, Ly = 2.0 * pi
     ! Derived paramenter
-    double precision, parameter :: dx = Lx/Nx, dy = Ly/Ny
+    double precision, parameter :: dx = Lx / Nx, dy = Ly / Ny
 
     real(C_DOUBLE), dimension(Nx, Ny) :: x, y, u0, eta, phi, in, dudx, dudxE, errdU
     real(C_DOUBLE), dimension(Nx/2+1, Ny) :: kx, ky
-
+    real(C_DOUBLE) :: t, dt
     ! Fourier space variables
-    complex(C_DOUBLE_COMPLEX), dimension(Nx / 2 + 1, Ny) :: fourier_eta, fourier_phi, out
+    complex(C_DOUBLE_COMPLEX), dimension(Nx / 2 + 1, Ny) :: fourier_eta, fourier_phi, fourier_eta_new, fourier_phi_new, out
     ! indices
     integer :: i, j
     !---FFTW plans
@@ -102,21 +136,39 @@ include 'fftw3.f03'
     pf = fftw_plan_dft_r2c_2d(Nx, Ny, in, out, FFTW_ESTIMATE)
 
     ! Go to Fourier Space
-    ! eta
+    ! eta -> b
     in = eta
     call fftw_execute_dft_r2c(pf, in, out)
     fourier_eta = out
     write(*,'(A)') 'Fourier Eta...'
     call print_matrix(fourier_eta, Nx / 2 + 1, Ny)
-    ! phi
+    ! phi -> a
     in = phi
     call fftw_execute_dft_r2c(pf, in, out)
     fourier_phi = out
     write(*,'(A)') 'Fourier Phi...'
     call print_matrix(fourier_phi, Nx / 2 + 1, Ny)
 
+    dt = 0.01_C_DOUBLE
+    t = 0.0_C_DOUBLE
+
+    forall(i = 1: Nx / 2 + 1, j = 1: Ny)
+        fourier_phi_new(i, j) = 0.0_C_DOUBLE
+        fourier_eta_new(i, j) = 0.0_C_DOUBLE
+    end forall
+
+    do i = 1, Nx / 2 + 1
+        do j = 1, Ny
+            ! d/dt a(n,p) = -g * b(n, p)
+            ! ^
+            ! v
+            ! d/dt fourier_phi(i, j) = -g * fourier_eta(i, j)
+            call runge_kutta4_Phi(fourier_phi(i, j), t, dt, fourier_eta(i, j), fourier_phi_new(i, j))
+        end do
+    end do
+
     ! Derivative
-    out = ii*kx*out
+!    out = ii*kx*out
 !    out = ii*ky*out
 
     ! Back to physical space
